@@ -127,3 +127,29 @@ test("ModelDraft 正确同步与持久化 claudeCode1mContext 兼容设置", asy
 	const savedDisabled = buildModelFromDraft(stored1mModel, draft, ccProvider.compat);
 	assert.equal(savedDisabled.compat?.claudeCode1mContext, undefined);
 });
+
+test("provider 级 forceAdaptiveThinking 下放到无覆盖模型且保存不写入显式 false", async () => {
+	const { buildModelFromDraft, createModelDraftFromStoredModel } = await import("../state-document.ts");
+	const provider: StoredProvider = {
+		name: "ClaudeGateway", api: "anthropic-messages", baseUrl: "https://gw.test/v1", managed: true,
+		clientHeaderProfile: "claude-code", compat: { forceAdaptiveThinking: true }, models: [],
+	};
+	const plainModel: StoredModel = {
+		id: "sonnet", reasoning: true, input: ["text"], contextWindow: 200_000, maxTokens: 16000,
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+	};
+
+	// 模型无自身覆盖时应继承 provider 级设置，草稿为 adaptive
+	const draft = createModelDraftFromStoredModel("ClaudeGateway", provider, plainModel);
+	assert.equal(draft.anthropicThinkingProtocol, "adaptive");
+
+	// 未改动开关直接保存时，不得把显式 false 写进模型 compat
+	draft.modelName = "renamed";
+	const saved = buildModelFromDraft(plainModel, draft, provider.compat);
+	assert.equal(saved.compat?.forceAdaptiveThinking, undefined);
+
+	// 模型级显式关闭仍优先于 provider 级开启
+	const legacyModel: StoredModel = { ...plainModel, id: "sonnet-legacy", compat: { forceAdaptiveThinking: false } };
+	const legacyDraft = createModelDraftFromStoredModel("ClaudeGateway", provider, legacyModel);
+	assert.equal(legacyDraft.anthropicThinkingProtocol, "legacy");
+});

@@ -160,6 +160,7 @@ export function createModelDraftFromStoredModel(
 	const reasoning = model.reasoning ?? preset.defaultReasoning;
 	const modelAdaptiveOverride = model.compat?.forceAdaptiveThinking;
 	const usesAdaptiveThinking = modelAdaptiveOverride === true
+		|| (modelAdaptiveOverride === undefined && stored.compat?.forceAdaptiveThinking === true);
 	const model1mOverride = model.compat?.claudeCode1mContext;
 	const uses1mContext = model1mOverride === true
 		|| (model1mOverride === undefined && stored.compat?.claudeCode1mContext === true);
