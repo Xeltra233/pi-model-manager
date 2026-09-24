@@ -127,6 +127,7 @@ function buildStoredModelFromModelsJson(
 			customClientHeaders,
 			metadata.clientHeaderCaptures,
 			effectiveCompat,
+			model.contextWindow,
 		)
 		: undefined;
 	const nativeHeaders = managed

@@ -140,6 +140,7 @@ function createModelDraftFromProvider(providerDraft: ProviderDraft): ModelDraft 
 		contextWindow: preset.contextWindow,
 		maxTokens: preset.maxTokens,
 		openAIServiceTier: undefined,
+		claudeCode1mContext: false,
 		selectedIndex: 0,
 	};
 }
@@ -159,7 +160,9 @@ export function createModelDraftFromStoredModel(
 	const reasoning = model.reasoning ?? preset.defaultReasoning;
 	const modelAdaptiveOverride = model.compat?.forceAdaptiveThinking;
 	const usesAdaptiveThinking = modelAdaptiveOverride === true
-		|| (modelAdaptiveOverride === undefined && stored.compat?.forceAdaptiveThinking === true);
+	const model1mOverride = model.compat?.claudeCode1mContext;
+	const uses1mContext = model1mOverride === true
+		|| (model1mOverride === undefined && stored.compat?.claudeCode1mContext === true);
 	return {
 		providerId,
 		providerName: stored.name ?? (providerId.replace(/^custom-/, "") || preset.defaultProviderName),
@@ -185,6 +188,7 @@ export function createModelDraftFromStoredModel(
 		contextWindow: model.contextWindow ?? preset.contextWindow,
 		maxTokens: model.maxTokens ?? preset.maxTokens,
 		openAIServiceTier: effectiveApi === "openai-responses" ? model.openAIServiceTier : undefined,
+		claudeCode1mContext: effectiveApi === "anthropic-messages" ? uses1mContext : undefined,
 		selectedIndex: 0,
 	};
 }
@@ -438,6 +442,19 @@ export function buildModelFromDraft(
 			compat.forceAdaptiveThinking = false;
 		} else {
 			delete compat.forceAdaptiveThinking;
+		}
+	}
+	if (effectiveApi === "anthropic-messages") {
+		const existing1mOverride = existing?.compat?.claudeCode1mContext;
+		const providerForces1m = providerCompat?.claudeCode1mContext === true;
+		if (draft.claudeCode1mContext === true) {
+			if (existing1mOverride === true || !providerForces1m) compat.claudeCode1mContext = true;
+			else delete compat.claudeCode1mContext;
+		} else if (draft.claudeCode1mContext === false) {
+			if (existing1mOverride === false || providerForces1m) compat.claudeCode1mContext = false;
+			else delete compat.claudeCode1mContext;
+		} else {
+			delete compat.claudeCode1mContext;
 		}
 	}
 

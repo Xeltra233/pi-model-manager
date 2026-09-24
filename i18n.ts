@@ -395,6 +395,13 @@ const ENGLISH_MESSAGES = {
 	"上游模型 ID 包含控制字符或终端转义序列，已拒绝显示": "An upstream model ID contains control characters or terminal escape sequences and was rejected",
 	"上游返回 {count} 个模型，超过上限 {maxCount}": "The upstream returned {count} models, exceeding the limit of {maxCount}",
 	"模型列表响应体超过 {maxBytes} 字节上限": "The model-list response exceeds the {maxBytes}-byte limit",
+	"ClaudeCode 原生 1M": "ClaudeCode Native 1M",
+	"开启（未生效 · 上下文需为 1M）": "Enabled (ineffective - context must be 1M)",
+	"快速设置 1M": "Quick set 1M",
+	"应用 1M 上下文并开启协议参数": "Apply 1M context and enable protocol parameter",
+	"已设置上下文窗口为 1000000 并开启 ClaudeCode 原生 1M": "Set context window to 1000000 and enabled ClaudeCode native 1M",
+	"开启 — 发送 context-1m-2025-08-07 beta 请求头（需 1M 上下文窗口）": "Enabled - send context-1m-2025-08-07 beta header (requires 1M context window)",
+	"关闭 — 不发送 1M beta 请求头": "Disabled - do not send 1M beta header",
 } as const;
 
 export type MessageKey = keyof typeof ENGLISH_MESSAGES;

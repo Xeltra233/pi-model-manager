@@ -9,6 +9,7 @@ import type { ApiKind, BuiltInClientHeaderProfileId, ClientHeaderProfileId, Comp
 import { CLAUDE_CODE_CLIENT_HEADERS, CODEX_CLI_CLIENT_HEADERS } from "./builtin-client-headers.ts";
 
 const ANTHROPIC_INTERLEAVED_THINKING_BETA = "interleaved-thinking-2025-05-14";
+const ANTHROPIC_CONTEXT_1M_BETA = "context-1m-2025-08-07";
 
 
 export function getClientHeaderProfileLabel(profile: ClientHeaderProfileId): string {
@@ -29,14 +30,41 @@ function removeAnthropicBetaFeature(headers: Record<string, string>, feature: st
 	else delete headers[betaHeaderKey];
 }
 
+function addAnthropicBetaFeature(headers: Record<string, string>, feature: string): void {
+	const betaHeaderKey = Object.keys(headers).find((name) => name.toLowerCase() === "anthropic-beta") ?? "anthropic-beta";
+	const current = headers[betaHeaderKey];
+	if (!current) {
+		headers[betaHeaderKey] = feature;
+		return;
+	}
+	const list = current
+		.split(",")
+		.map((value) => value.trim())
+		.filter(Boolean);
+	if (!list.includes(feature)) {
+		list.push(feature);
+		headers[betaHeaderKey] = list.join(",");
+	}
+}
+
 function cloneHeadersForCompat(
 	headers: Record<string, string>,
 	api: ApiKind,
 	compat?: CompatSettings,
+	contextWindow?: number,
 ): Record<string, string> {
 	const cloned = cloneStringRecord(headers);
-	if (api === "anthropic-messages" && compat?.forceAdaptiveThinking === true) {
-		removeAnthropicBetaFeature(cloned, ANTHROPIC_INTERLEAVED_THINKING_BETA);
+	if (api === "anthropic-messages") {
+		if (compat?.forceAdaptiveThinking === true) {
+			removeAnthropicBetaFeature(cloned, ANTHROPIC_INTERLEAVED_THINKING_BETA);
+		}
+		const wants1m = compat?.claudeCode1mContext === true;
+		const is1mWindow = typeof contextWindow === "number" && contextWindow >= 1_000_000;
+		if (wants1m && is1mWindow) {
+			addAnthropicBetaFeature(cloned, ANTHROPIC_CONTEXT_1M_BETA);
+		} else {
+			removeAnthropicBetaFeature(cloned, ANTHROPIC_CONTEXT_1M_BETA);
+		}
 	}
 	return cloned;
 }
@@ -84,6 +112,7 @@ export function getClientHeadersForProfile(
 	customHeaders: Record<string, string>,
 	clientHeaderCaptures: Partial<Record<BuiltInClientHeaderProfileId, StoredClientHeaderCapture>> = {},
 	compat?: CompatSettings,
+	contextWindow?: number,
 ): Record<string, string> | undefined {
 	const resolved = resolveClientHeaderProfile(profile, api);
 	if (resolved === "disabled") return undefined;
@@ -91,7 +120,7 @@ export function getClientHeadersForProfile(
 		const headers = hasStringRecordEntries(clientHeaderCaptures[resolved]?.headers)
 			? clientHeaderCaptures[resolved]!.headers
 			: CLAUDE_CODE_CLIENT_HEADERS;
-		return cloneHeadersForCompat(headers, api, compat);
+		return cloneHeadersForCompat(headers, api, compat, contextWindow);
 	}
 	if (resolved === "codex-cli") {
 		const headers = hasStringRecordEntries(clientHeaderCaptures[resolved]?.headers)

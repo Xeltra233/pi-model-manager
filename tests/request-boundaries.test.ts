@@ -73,3 +73,57 @@ test("无法安全提取的首条系统内容保留原 payload", async () => {
 	const payload = { model: "responses", service_tier: "auto", input: [{ role: "developer", content: [{ type: "input_image", image_url: "local-fixture" }] }] };
 	assert.equal(await createRequestPipeline().transform(payload, context("responses", "openai-responses")), undefined);
 });
+
+test("ClaudeCode 原生 1M 仅在开启且上下文窗口达到 1M 时注入 beta 请求头", () => {
+	// 1. 未开启 1M 时，即使窗口为 1M 也不带 1M beta
+	const headersWithoutOptIn = getClientHeadersForProfile("claude-code", "anthropic-messages", {}, {}, {}, 1_000_000);
+	assert.equal(headersWithoutOptIn?.["anthropic-beta"]?.includes("context-1m-2025-08-07"), false);
+
+	// 2. 开启 1M 但上下文小于 1M（如 200k）时，设置无效，不注入 1M beta
+	const headersSmallContext = getClientHeadersForProfile("claude-code", "anthropic-messages", {}, {}, { claudeCode1mContext: true }, 200_000);
+	assert.equal(headersSmallContext?.["anthropic-beta"]?.includes("context-1m-2025-08-07"), false);
+
+	// 3. 开启 1M 且上下文达到 1M（1000000）时，正常注入 1M beta
+	const headers1m = getClientHeadersForProfile("claude-code", "anthropic-messages", {}, {}, { claudeCode1mContext: true }, 1_000_000);
+	assert.equal(headers1m?.["anthropic-beta"]?.includes("context-1m-2025-08-07"), true);
+
+	// 4. 通过 buildModelRequestHeaders 端到端测试
+	const ccProvider: StoredProvider = {
+		name: "ClaudeGateway", api: "anthropic-messages", baseUrl: "https://gw.test/v1", managed: true,
+		clientHeaderProfile: "recommended",
+		models: [],
+	};
+	const model200k: StoredModel = { id: "sonnet-200k", reasoning: true, input: ["text"], contextWindow: 200_000, maxTokens: 16000, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, compat: { claudeCode1mContext: true } };
+	const model1m: StoredModel = { id: "sonnet-1m", reasoning: true, input: ["text"], contextWindow: 1_000_000, maxTokens: 32000, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, compat: { claudeCode1mContext: true } };
+
+	const headersResult200k = buildModelRequestHeaders(ccProvider, model200k, {}, {})!;
+	assert.equal(headersResult200k["anthropic-beta"]?.includes("context-1m-2025-08-07"), false);
+
+	const headersResult1m = buildModelRequestHeaders(ccProvider, model1m, {}, {})!;
+	assert.equal(headersResult1m["anthropic-beta"]?.includes("context-1m-2025-08-07"), true);
+});
+
+test("ModelDraft 正确同步与持久化 claudeCode1mContext 兼容设置", async () => {
+	const { buildModelFromDraft, createModelDraftFromStoredModel } = await import("../state-document.ts");
+	const ccProvider: StoredProvider = {
+		name: "ClaudeGateway", api: "anthropic-messages", baseUrl: "https://gw.test/v1", managed: true,
+		clientHeaderProfile: "claude-code",
+		models: [],
+	};
+	const stored1mModel: StoredModel = {
+		id: "sonnet-test", reasoning: true, input: ["text"], contextWindow: 1_000_000, maxTokens: 32000,
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, compat: { claudeCode1mContext: true },
+	};
+	const draft = createModelDraftFromStoredModel("ClaudeGateway", ccProvider, stored1mModel);
+	assert.equal(draft.claudeCode1mContext, true);
+	assert.equal(draft.contextWindow, 1_000_000);
+
+	// 保存时保留该 compat
+	const savedModel = buildModelFromDraft(stored1mModel, draft, ccProvider.compat);
+	assert.equal(savedModel.compat?.claudeCode1mContext, true);
+
+	// 关闭开关后保存
+	draft.claudeCode1mContext = false;
+	const savedDisabled = buildModelFromDraft(stored1mModel, draft, ccProvider.compat);
+	assert.equal(savedDisabled.compat?.claudeCode1mContext, undefined);
+});

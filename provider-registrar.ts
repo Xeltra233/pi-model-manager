@@ -76,6 +76,7 @@ export function buildModelRequestHeaders(
 		customHeaders,
 		clientHeaderCaptures,
 		effectiveCompat,
+		model.contextWindow,
 	);
 	const explicitHeaders = mergeModelRequestHeaders(provider.headers, model.headers);
 	return provider.clientHeaderProfile === "custom"

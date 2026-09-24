@@ -8,6 +8,7 @@
 
 import { BorderedLoader, type ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { t } from "../i18n.ts";
+import { resolveClientHeaderProfile } from "../presets/client-headers.ts";
 import type { AnthropicThinkingProtocol, BuiltInClientHeaderProfileId, ModelDraft, ModelListFetchOutcome, ReasoningMode, StoredClientHeaderCapture, StoredRequestHeaderProfile } from "../types.ts";
 import { fetchModelIds } from "./model-list-fetch.ts";
 import { pickModelIdFromList } from "./model-picker.ts";
@@ -32,6 +33,11 @@ function shouldShowOpenAIServiceTier(draft: ModelDraft): boolean {
 	return draft.api === "openai-responses";
 }
 
+function shouldShowClaudeCode1m(draft: ModelDraft): boolean {
+	return draft.api === "anthropic-messages"
+		&& resolveClientHeaderProfile(draft.clientHeaderProfile, draft.api) === "claude-code";
+}
+
 function shouldShowAnthropicThinkingProtocol(draft: ModelDraft): boolean {
 	return draft.reasoningMode === "enabled" && draft.anthropicThinkingProtocol !== undefined;
 }
@@ -47,6 +53,12 @@ function describeAnthropicThinkingProtocol(protocol: AnthropicThinkingProtocol):
 
 function describeOpenAIServiceTier(draft: ModelDraft): string {
 	return draft.openAIServiceTier === "priority" ? t("开启 · priority") : t("关闭");
+}
+
+function describeClaudeCode1mContext(draft: ModelDraft): string {
+	if (!draft.claudeCode1mContext) return t("关闭");
+	if (draft.contextWindow >= 1_000_000) return t("开启");
+	return t("开启（未生效 · 上下文需为 1M）");
 }
 
 function getIntegerFieldLabel(field: "contextWindow" | "maxTokens"): string {
@@ -72,6 +84,10 @@ function applyHorizontalToggle(draft: ModelDraft, fieldId: string): boolean {
 		draft.openAIServiceTier = draft.openAIServiceTier === "priority" ? undefined : "priority";
 		return true;
 	}
+	if (fieldId === "claudeCode1mContext") {
+		draft.claudeCode1mContext = !draft.claudeCode1mContext;
+		return true;
+	}
 	return false;
 }
 
@@ -93,6 +109,19 @@ function buildRows(draft: ModelDraft): FieldRow[] {
 	}
 	if (shouldShowOpenAIServiceTier(draft)) {
 		rows.push({ id: "openAIServiceTier", label: "Fast mode", value: describeOpenAIServiceTier(draft), adjustable: true });
+	}
+	if (shouldShowClaudeCode1m(draft)) {
+		rows.push({
+			id: "claudeCode1mContext",
+			label: "ClaudeCode 1M",
+			value: describeClaudeCode1mContext(draft),
+			adjustable: true,
+		});
+		rows.push({
+			id: "preset1m",
+			label: t("快速设置 1M"),
+			value: t("应用 1M 上下文并开启协议参数"),
+		});
 	}
 	rows.push(
 		{ id: "contextWindow", label: t("上下文窗口"), value: String(draft.contextWindow) },
@@ -253,6 +282,25 @@ async function editField(
 			draft.openAIServiceTier === "priority" ? "priority" : "disabled",
 		);
 		if (choice) draft.openAIServiceTier = choice.tier;
+		return;
+	}
+	if (fieldId === "preset1m") {
+		draft.contextWindow = 1_000_000;
+		draft.claudeCode1mContext = true;
+		ctx.ui.notify(t("已设置上下文窗口为 1000000 并开启 ClaudeCode 原生 1M"), "info");
+		return;
+	}
+	if (fieldId === "claudeCode1mContext") {
+		const choice = await showOptionPicker(
+			ctx,
+			"ClaudeCode 1M",
+			[
+				{ id: "enabled", value: true, label: t("开启 — 发送 context-1m-2025-08-07 beta 请求头（需 1M 上下文窗口）") },
+				{ id: "disabled", value: false, label: t("关闭 — 不发送 1M beta 请求头") },
+			],
+			draft.claudeCode1mContext ? "enabled" : "disabled",
+		);
+		if (choice) draft.claudeCode1mContext = choice.value;
 		return;
 	}
 	if (fieldId === "contextWindow" || fieldId === "maxTokens") {
