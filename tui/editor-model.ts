@@ -113,7 +113,7 @@ function buildRows(draft: ModelDraft): FieldRow[] {
 	if (shouldShowClaudeCode1m(draft)) {
 		rows.push({
 			id: "claudeCode1mContext",
-			label: "ClaudeCode 1M",
+			label: t("ClaudeCode 1M 声明"),
 			value: describeClaudeCode1mContext(draft),
 			adjustable: true,
 		});
@@ -293,7 +293,7 @@ async function editField(
 	if (fieldId === "claudeCode1mContext") {
 		const choice = await showOptionPicker(
 			ctx,
-			"ClaudeCode 1M",
+			t("ClaudeCode 1M 声明"),
 			[
 				{ id: "enabled", value: true, label: t("开启 — 发送 context-1m-2025-08-07 beta 请求头（需 1M 上下文窗口）") },
 				{ id: "disabled", value: false, label: t("关闭 — 不发送 1M beta 请求头") },

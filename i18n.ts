@@ -396,6 +396,7 @@ const ENGLISH_MESSAGES = {
 	"上游返回 {count} 个模型，超过上限 {maxCount}": "The upstream returned {count} models, exceeding the limit of {maxCount}",
 	"模型列表响应体超过 {maxBytes} 字节上限": "The model-list response exceeds the {maxBytes}-byte limit",
 	"ClaudeCode 原生 1M": "ClaudeCode Native 1M",
+	"ClaudeCode 1M 声明": "ClaudeCode 1M declaration",
 	"开启（未生效 · 上下文需为 1M）": "Enabled (ineffective - context must be 1M)",
 	"快速设置 1M": "Quick set 1M",
 	"应用 1M 上下文并开启协议参数": "Apply 1M context and enable protocol parameter",
