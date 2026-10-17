@@ -11,6 +11,11 @@
 
 import { cloneJson, cloneStringRecord, hasStringRecordEntries, trimOrFallback } from "./common.ts";
 import {
+	applyAnthropicThinkingCompat,
+	isAnthropicThinkingDisabledRejected,
+	resolveAnthropicThinkingProtocol,
+} from "./anthropic-thinking.ts";
+import {
 	getConfigValueEnvVarNames,
 	getSingleConfigValueEnvVarName,
 	isCommandConfigValue,
@@ -31,6 +36,7 @@ import type {
 	StoredModel,
 	StoredProvider,
 	StoredRequestHeaderProfile,
+	ThinkingLevelMap,
 } from "./types.ts";
 import { DEFAULT_PROVIDER_HTTP_PROXY_URL, ZERO_COST } from "./types.ts";
 
@@ -159,8 +165,12 @@ export function createModelDraftFromStoredModel(
 	const preset = findPresetForApi(effectiveApi);
 	const reasoning = model.reasoning ?? preset.defaultReasoning;
 	const modelAdaptiveOverride = model.compat?.forceAdaptiveThinking;
-	const usesAdaptiveThinking = modelAdaptiveOverride === true
-		|| (modelAdaptiveOverride === undefined && stored.compat?.forceAdaptiveThinking === true);
+	const storedThinkingProtocol = modelAdaptiveOverride === true
+		|| (modelAdaptiveOverride === undefined && stored.compat?.forceAdaptiveThinking === true)
+		? "adaptive"
+		: "legacy";
+	// 只接受一种协议的模型以能力表为准：旧配置没写 compat 时也必须展示真实生效的协议。
+	const thinkingProtocol = resolveAnthropicThinkingProtocol(model.id) ?? storedThinkingProtocol;
 	const model1mOverride = model.compat?.claudeCode1mContext;
 	const uses1mContext = model1mOverride === true
 		|| (model1mOverride === undefined && stored.compat?.claudeCode1mContext === true);
@@ -183,9 +193,7 @@ export function createModelDraftFromStoredModel(
 		modelName: model.name ?? "",
 		inputKinds: [...(model.input ?? preset.inputKinds)],
 		reasoningMode: reasoning ? "enabled" : "disabled",
-		anthropicThinkingProtocol: effectiveApi === "anthropic-messages"
-			? (usesAdaptiveThinking ? "adaptive" : "legacy")
-			: undefined,
+		anthropicThinkingProtocol: effectiveApi === "anthropic-messages" ? thinkingProtocol : undefined,
 		contextWindow: model.contextWindow ?? preset.contextWindow,
 		maxTokens: model.maxTokens ?? preset.maxTokens,
 		openAIServiceTier: effectiveApi === "openai-responses" ? model.openAIServiceTier : undefined,
@@ -336,6 +344,7 @@ function keepModelFieldsSupportedByApi(model: StoredModel, providerApi: ApiKind,
 		effectiveApi,
 		next.reasoning,
 		providerApiChanged && !normalized.api ? undefined : next.thinkingLevelMap,
+		next.id,
 	);
 	if (thinkingLevelMap) next.thinkingLevelMap = thinkingLevelMap;
 	else delete next.thinkingLevelMap;
@@ -410,7 +419,7 @@ export function buildModelFromDraft(
 	const compat: CompatSettings = cloneJson(existing?.compat) ?? {};
 	const effectiveApi = isApiKind(existing?.api) ? existing.api : draft.api;
 	const storedThinkingLevelMap = cloneJson(existing?.thinkingLevelMap);
-	const thinkingLevelMap = normalizeThinkingLevelMap(effectiveApi, reasoning, storedThinkingLevelMap);
+	const thinkingLevelMap = normalizeThinkingLevelMap(effectiveApi, reasoning, storedThinkingLevelMap, modelId);
 
 	const next: StoredModel = {
 		id: modelId,
@@ -436,7 +445,10 @@ export function buildModelFromDraft(
 	if (effectiveApi === "anthropic-messages" && draft.anthropicThinkingProtocol) {
 		const existingOverride = existing?.compat?.forceAdaptiveThinking;
 		const providerForcesAdaptiveThinking = providerCompat?.forceAdaptiveThinking === true;
-		if (draft.anthropicThinkingProtocol === "adaptive") {
+		// [喵喵喵]: 只接受一种协议的模型不接受用户手选另一种；这里直接落能力表结论，
+		// 避免保存出一个必然 400 的 compat。
+		const thinkingProtocol = resolveAnthropicThinkingProtocol(modelId) ?? draft.anthropicThinkingProtocol;
+		if (thinkingProtocol === "adaptive") {
 			if (existingOverride === true || !providerForcesAdaptiveThinking) compat.forceAdaptiveThinking = true;
 			else delete compat.forceAdaptiveThinking;
 		} else if (existingOverride === false || providerForcesAdaptiveThinking) {
@@ -562,6 +574,73 @@ export function normalizeProviderBaseUrlsInDocument(
 		const provider = next.providers[providerId];
 		if (!provider?.managed || !provider.baseUrl) continue;
 		provider.baseUrl = resolveRuntimeBaseUrl(provider.api, provider.baseUrl);
+	}
+	return next;
+}
+
+// [喵喵喵]: 旧配置把 Claude 4.7+ 留在了 legacy thinking（thinking.type=enabled），上游直接 400。
+// state 视图已经按能力表归一化，所以迁移必须比对 models.json 里的原始值，否则永远检测不到差异。
+// 启动时补齐 forceAdaptiveThinking，并给不能关闭思考的模型写上 off=null。
+export interface AnthropicThinkingSourceEntry {
+	compat?: CompatSettings;
+	models?: ReadonlyArray<{ id?: string; compat?: CompatSettings; thinkingLevelMap?: ThinkingLevelMap }>;
+}
+
+export function findAnthropicThinkingNormalizationTargets(
+	document: StateDocument,
+	source: { providers?: Record<string, AnthropicThinkingSourceEntry | undefined> },
+): Array<{ providerId: string; modelIds: string[] }> {
+	const targets: Array<{ providerId: string; modelIds: string[] }> = [];
+	for (const [providerId, provider] of Object.entries(document.providers)) {
+		if (!provider.managed) continue;
+		const sourceProvider = source.providers?.[providerId];
+		if (!sourceProvider) continue;
+		const sourceModels = new Map(
+			(sourceProvider.models ?? [])
+				.filter((model): model is { id: string } => typeof model.id === "string")
+				.map((model) => [model.id, model]),
+		);
+		const modelIds = provider.models
+			.filter((model) => needsAnthropicThinkingNormalization(provider, model, sourceProvider, sourceModels.get(model.id)))
+			.map((model) => model.id);
+		if (modelIds.length > 0) targets.push({ providerId, modelIds });
+	}
+	return targets;
+}
+
+function needsAnthropicThinkingNormalization(
+	provider: StoredProvider,
+	model: StoredModel,
+	sourceProvider: AnthropicThinkingSourceEntry,
+	sourceModel: { compat?: CompatSettings; thinkingLevelMap?: ThinkingLevelMap } | undefined,
+): boolean {
+	if (!sourceModel) return false;
+	const api = isApiKind(model.api) ? model.api : provider.api;
+	if (api !== "anthropic-messages" || !model.reasoning) return false;
+	const storedAdaptive = sourceModel.compat?.forceAdaptiveThinking ?? sourceProvider.compat?.forceAdaptiveThinking;
+	const required = resolveAnthropicThinkingProtocol(model.id);
+	if (required === "adaptive" && storedAdaptive !== true) return true;
+	if (required === "legacy" && storedAdaptive === true) return true;
+	// 不能关闭思考的模型需要 off=null，Pi 才会省略 thinking.type=disabled。
+	return isAnthropicThinkingDisabledRejected(model.id) && sourceModel.thinkingLevelMap?.off !== null;
+}
+
+export function normalizeAnthropicThinkingInDocument(
+	document: StateDocument,
+	providerIds: readonly string[],
+): StateDocument {
+	const next: StateDocument = cloneJson(document);
+	for (const providerId of providerIds) {
+		const provider = next.providers[providerId];
+		if (!provider?.managed) continue;
+		for (const model of provider.models) {
+			const api = isApiKind(model.api) ? model.api : provider.api;
+			const compat = applyAnthropicThinkingCompat(api, model.reasoning, model.id, model.compat, provider.compat);
+			if (compat) model.compat = compat;
+			const thinkingLevelMap = normalizeThinkingLevelMap(api, model.reasoning, model.thinkingLevelMap, model.id);
+			if (thinkingLevelMap) model.thinkingLevelMap = thinkingLevelMap;
+			else delete model.thinkingLevelMap;
+		}
 	}
 	return next;
 }

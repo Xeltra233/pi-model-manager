@@ -1,5 +1,6 @@
 // thinkingLevelMap 的协议默认值与持久化归一化。
 
+import { isAnthropicThinkingDisabledRejected } from "../anthropic-thinking.ts";
 import type { ApiKind, ThinkingLevelMap } from "../types.ts";
 
 const EXTENDED_THINKING_LEVEL_MAP: ThinkingLevelMap = {
@@ -65,9 +66,18 @@ export function normalizeThinkingLevelMap(
 	api: ApiKind,
 	reasoning: boolean,
 	storedMap: ThinkingLevelMap | undefined,
+	modelId?: string,
 ): ThinkingLevelMap | undefined {
 	if (!reasoning) return undefined;
 	const defaultMap = buildThinkingLevelMap(api, true);
-	if (storedMap && isLegacyShiftedMaxLadder(storedMap)) return defaultMap;
-	return applyProtocolThinkingLevelLimits(api, mergeThinkingLevelMap(defaultMap, storedMap));
+	const normalized = storedMap && isLegacyShiftedMaxLadder(storedMap)
+		? defaultMap
+		: applyProtocolThinkingLevelLimits(api, mergeThinkingLevelMap(defaultMap, storedMap));
+	if (!normalized) return undefined;
+	// [喵喵喵]: Fable/Mythos 5、Opus 5.5、Sonnet 5.5 不能关闭思考；off=null 让 Pi 省掉
+	// thinking.type=disabled，否则这些模型会直接 400。
+	if (api === "anthropic-messages" && modelId && isAnthropicThinkingDisabledRejected(modelId)) {
+		return { ...normalized, off: null };
+	}
+	return normalized;
 }

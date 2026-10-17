@@ -2,15 +2,17 @@
 
 import { ModelRuntime, type ExtensionAPI, type ProviderConfig } from "@earendil-works/pi-coding-agent";
 import type { Provider } from "@earendil-works/pi-ai";
+import { applyAnthropicThinkingCompat } from "./anthropic-thinking.ts";
 import { isBuiltinProviderId } from "./builtin-model-catalog.ts";
 import { mergeCompatSettings } from "./compat-settings.ts";
 import { formatUnknownError } from "./common.ts";
 import { t } from "./i18n.ts";
 import { removeProviderLocalProxyRoutes } from "./local-proxy-service.ts";
 import { getClientHeadersForProfile, mergeModelRequestHeaders } from "./presets/client-headers.ts";
+import { normalizeThinkingLevelMap } from "./presets/thinking.ts";
 import { createProviderTransport } from "./provider-transport.ts";
 import { resolveRuntimeBaseUrl } from "./runtime-base-url.ts";
-import type { ApiKind, BuiltInClientHeaderProfileId, StateDocument, StoredClientHeaderCapture, StoredModel, StoredProvider, StoredRequestHeaderProfile } from "./types.ts";
+import type { ApiKind, BuiltInClientHeaderProfileId, CompatSettings, StateDocument, StoredClientHeaderCapture, StoredModel, StoredProvider, StoredRequestHeaderProfile } from "./types.ts";
 
 type ProviderModelConfig = NonNullable<ProviderConfig["models"]>[number];
 const REGISTERED_PROVIDER_CONFIGS = new Map<string, Provider>();
@@ -53,6 +55,19 @@ function asManagedApi(value: string | undefined, fallback: ApiKind): ApiKind {
 	return fallback;
 }
 
+// [喵喵喵]: 只接受 adaptive / extended 其中一种的模型，注册时就把 compat 定死；
+// 否则 Pi 会按 legacy 发 thinking.type=enabled，Claude 4.7+ 直接 400。
+function resolveModelCompat(provider: StoredProvider, model: StoredModel): CompatSettings | undefined {
+	const merged = mergeCompatSettings(provider.compat, model.compat);
+	if (!provider.managed) return merged;
+	return applyAnthropicThinkingCompat(
+		asManagedApi(model.api, provider.api),
+		model.reasoning,
+		model.id,
+		merged,
+	) ?? merged;
+}
+
 function resolveModelRuntimeBaseUrl(provider: StoredProvider, model: StoredModel): string | undefined {
 	if (!model.baseUrl) return undefined;
 	return resolveRuntimeBaseUrl(asManagedApi(model.api, provider.api), model.baseUrl);
@@ -69,7 +84,7 @@ export function buildModelRequestHeaders(
 		? resolveProviderCustomHeaders(provider, requestHeaderProfiles)
 		: {};
 	const effectiveApi = asManagedApi(model.api, provider.api);
-	const effectiveCompat = mergeCompatSettings(provider.compat, model.compat);
+	const effectiveCompat = resolveModelCompat(provider, model);
 	const profileHeaders = getClientHeadersForProfile(
 		provider.clientHeaderProfile,
 		effectiveApi,
@@ -96,13 +111,18 @@ function buildModelConfig(
 		api: model.api as ProviderModelConfig["api"],
 		baseUrl: resolveModelRuntimeBaseUrl(provider, model),
 		reasoning: model.reasoning,
-		thinkingLevelMap: model.thinkingLevelMap,
+		thinkingLevelMap: normalizeThinkingLevelMap(
+			asManagedApi(model.api, provider.api),
+			model.reasoning,
+			model.thinkingLevelMap,
+			model.id,
+		),
 		input: model.input,
 		cost: model.cost,
 		contextWindow: model.contextWindow,
 		maxTokens: model.maxTokens,
 		headers: buildModelRequestHeaders(provider, model, requestHeaderProfiles, clientHeaderCaptures),
-		compat: mergeCompatSettings(provider.compat, model.compat) as ProviderModelConfig["compat"],
+		compat: resolveModelCompat(provider, model) as ProviderModelConfig["compat"],
 	};
 }
 

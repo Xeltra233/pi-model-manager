@@ -131,7 +131,7 @@ Ctrl+S 保存并启用模型；不切换当前会话模型
 - Choose Pi's standard default behavior or a `system`-role compatibility mode for OpenAI Chat providers.
 - Fetch model IDs from compatible upstream APIs or enter them manually.
 - Configure context window, maximum output, vision support, and reasoning support.
-- Choose Anthropic Adaptive Thinking or Legacy Thinking.
+- Choose Anthropic Adaptive Thinking or Legacy Thinking; models that accept only one protocol (Claude 4.7+, Fable/Mythos 5, and Sonnet 5 families use adaptive; Claude 4.5 and earlier use legacy) are pinned by model ID, and stale `forceAdaptiveThinking` settings are migrated at startup.
 - Enable `service_tier=priority` (Fast mode) per OpenAI Responses model.
 - Route each provider directly or through its own HTTP(S) proxy.
 - Use recommended, disabled, Claude Code, Codex, or custom client-header profiles.
@@ -225,7 +225,7 @@ Model capabilities include:
 - Display name
 - Vision support (text only, or text + image input)
 - Reasoning support
-- Anthropic Adaptive/Legacy Thinking
+- Anthropic Adaptive/Legacy Thinking (models that accept only one protocol are marked as model-required)
 - OpenAI Responses Fast mode
 - Context window and maximum output tokens
 

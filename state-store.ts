@@ -22,6 +22,7 @@ import {
 	stripManagedClientHeaders,
 } from "./presets/client-headers.ts";
 import { normalizeThinkingLevelMap } from "./presets/thinking.ts";
+import { applyAnthropicThinkingCompat } from "./anthropic-thinking.ts";
 import { fromNativeBaseUrl, resolveRuntimeBaseUrl, toNativeBaseUrl } from "./runtime-base-url.ts";
 import {
 	CONFIGURATION_TRANSACTION_PATH,
@@ -158,9 +159,19 @@ function buildStoredModelFromModelsJson(
 	if (nativeHeaders) stored.headers = nativeHeaders;
 	if (model.name) stored.name = model.name;
 	const storedThinkingLevelMap = model.thinkingLevelMap ? cloneJson(model.thinkingLevelMap) as ThinkingLevelMap : undefined;
-	const thinkingLevelMap = normalizeThinkingLevelMap(effectiveApi, stored.reasoning, storedThinkingLevelMap);
+	const thinkingLevelMap = normalizeThinkingLevelMap(effectiveApi, stored.reasoning, storedThinkingLevelMap, model.id);
 	if (thinkingLevelMap) stored.thinkingLevelMap = thinkingLevelMap;
-	if (modelCompat) stored.compat = modelCompat;
+	// [喵喵喵]: 只接受一种 thinking 协议的模型（Claude 4.7+/4.5、Fable/Mythos 5）以能力表为准，
+	// 旧配置里的缺失或相反设置在这里就归一化，让 TUI 和注册层看到同一个有效值。
+	const requiredThinkingCompat = applyAnthropicThinkingCompat(
+		effectiveApi,
+		stored.reasoning,
+		model.id,
+		modelCompat,
+		providerCompat,
+	);
+	if (requiredThinkingCompat) stored.compat = requiredThinkingCompat;
+	else if (modelCompat) stored.compat = modelCompat;
 	if (effectiveApi === "openai-responses" && modelMetadata?.openAIServiceTier) {
 		stored.openAIServiceTier = modelMetadata.openAIServiceTier;
 	}

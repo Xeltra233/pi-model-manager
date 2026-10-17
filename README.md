@@ -131,7 +131,7 @@ Ctrl+S 保存并启用模型；不切换当前会话模型
 - 为 OpenAI Chat 接入提供标准 Pi 默认行为与 `system` role 兼容模式。
 - 从兼容上游拉取模型 ID，也可手动填写模型。
 - 配置上下文窗口、最大输出、视觉支持和 Thinking。
-- 支持 Anthropic Adaptive Thinking 与 Legacy Thinking。
+- 支持 Anthropic Adaptive Thinking 与 Legacy Thinking；只接受单一协议的模型（Claude 4.7+、Fable/Mythos 5、Sonnet 5 系列用 adaptive，Claude 4.5 及更早用 legacy）按模型 ID 自动锁定协议，启动时自动迁移旧的 `forceAdaptiveThinking` 配置。
 - 可为 OpenAI Responses 模型启用 `service_tier=priority`（Fast mode）。
 - 为每个接入单独配置直连或 HTTP(S) 代理。
 - 提供自动推荐、禁用、Claude Code、Codex 和自定义请求头模式。
@@ -229,7 +229,7 @@ Anthropic 标准端点在写入 `models.json` 时转换为 Pi 原生 SDK 所需�
 - 显示名称
 - 视觉支持（仅文本或文本 + 图片输入）
 - Thinking 开关
-- Anthropic Adaptive/Legacy Thinking 协议
+- Anthropic Adaptive/Legacy Thinking 协议（只接受单一协议的模型标注“模型强制”）
 - OpenAI Responses Fast mode
 - Context window 与最大输出 token
 

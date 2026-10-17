@@ -14,7 +14,13 @@ import { DEFAULT_UI_LANGUAGE, joinLocalizedList, setUiLanguage, t } from "./i18n
 import { readUiLanguage } from "./ui-language-settings.ts";
 import { persistManagedConfiguration, recoverPendingConfigurationTransaction, migrateManagedEndpointConfiguration } from "./configuration-persistence.ts";
 import { resetClaudeCodeMetadataSession } from "./claude-code-compat.ts";
-import { findProvidersNeedingBaseUrlNormalization, normalizeProviderBaseUrlsInDocument } from "./state-document.ts";
+import {
+	findAnthropicThinkingNormalizationTargets,
+	findProvidersNeedingBaseUrlNormalization,
+	normalizeAnthropicThinkingInDocument,
+	normalizeProviderBaseUrlsInDocument,
+} from "./state-document.ts";
+import { readModelsJsonSnapshot } from "./models-json-manager.ts";
 import { closeLocalProxyServer } from "./local-proxy-service.ts";
 import { registerAllFromState, registerCatalogFromState } from "./provider-registrar.ts";
 import { createRequestPipeline } from "./request-pipeline.ts";
@@ -64,6 +70,7 @@ export default async function modelManagerExtension(pi: ExtensionAPI): Promise<v
 		resetClaudeCodeMetadataSession();
 		const transportErrors: string[] = [];
 		let migratedBaseUrlProviderIds: string[] = [];
+		let alignedThinkingModelIds: string[] = [];
 		try {
 			if (configurationBlocked) {
 				await recoverPendingConfigurationTransaction();
@@ -84,6 +91,22 @@ export default async function modelManagerExtension(pi: ExtensionAPI): Promise<v
 					removedProviderIds: [],
 				}));
 				migratedBaseUrlProviderIds = staleBaseUrlProviderIds;
+			}
+			// [喵喵喵]: Claude 4.7+ 只接受 adaptive thinking，旧配置里缺失的 compat 会让上游回
+			// 400（"requires adaptive thinking"）。这里按能力表补齐并写回 models.json。
+			const thinkingTargets = findAnthropicThinkingNormalizationTargets(
+				currentState,
+				(await readModelsJsonSnapshot()).document,
+			);
+			if (thinkingTargets.length > 0) {
+				const providerIds = thinkingTargets.map((target) => target.providerId);
+				await persistManagedConfiguration(ctx, (latest) => ({
+					document: normalizeAnthropicThinkingInDocument(latest, providerIds),
+					changedProviderIds: providerIds,
+					removedProviderIds: [],
+				}));
+				alignedThinkingModelIds = thinkingTargets.flatMap((target) =>
+					target.modelIds.map((modelId) => `${target.providerId}/${modelId}`));
 			}
 		} catch (error) {
 			configurationBlocked = true;
@@ -108,6 +131,15 @@ export default async function modelManagerExtension(pi: ExtensionAPI): Promise<v
 				t("[pi-model-manager] 已规范化 {count} 个接入的 API 根地址（{providerIds}）", {
 					count: migratedBaseUrlProviderIds.length,
 					providerIds: joinLocalizedList(migratedBaseUrlProviderIds),
+				}),
+				"info",
+			);
+		}
+		if (alignedThinkingModelIds.length > 0) {
+			ctx.ui.notify(
+				t("[pi-model-manager] 已把 {count} 个模型的 thinking 协议对齐到上游要求（{modelIds}）", {
+					count: alignedThinkingModelIds.length,
+					modelIds: joinLocalizedList(alignedThinkingModelIds),
 				}),
 				"info",
 			);

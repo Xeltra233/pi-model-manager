@@ -4,6 +4,7 @@
 // StateDocument；跨请求由 state-cache.ts 按配置文件签名复用状态。
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { normalizeAnthropicAdaptiveThinkingPayload } from "./anthropic-thinking.ts";
 import { injectClaudeCodeMetadata } from "./claude-code-compat.ts";
 import { formatUnknownError } from "./common.ts";
 import { t, type MessageKey } from "./i18n.ts";
@@ -21,6 +22,16 @@ type RequestTransform = {
 
 
 const REQUEST_TRANSFORMS: RequestTransform[] = [
+	{
+		// [喵喵喵]: 兜底：模型若不是本插件注册的（或旧 compat 尚未迁移），Pi 仍会发 legacy
+		// thinking.type=enabled；Claude 4.7+ 会直接 400，这里按能力表改写成 adaptive。
+		id: "anthropic-adaptive-thinking",
+		warning: "Anthropic thinking 协议兜底改写失败，本次请求使用原始 payload",
+		run(payload, ctx) {
+			if (!ctx.model || ctx.model.api !== "anthropic-messages") return undefined;
+			return normalizeAnthropicAdaptiveThinkingPayload(payload, ctx.model.id);
+		},
+	},
 	{
 		id: "claude-code-metadata",
 		warning: "ClaudeCode metadata 注入失败，本次请求仅使用请求头",
